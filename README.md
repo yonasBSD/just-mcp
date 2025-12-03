@@ -96,6 +96,13 @@ cd just-mcp
 cargo build --release
 ```
 
+#### pkgx (pkgxdev)
+```bash
+pkgx just-mcp --stdio
+```
+
+`pkgx` downloads the platform-specific tarball that GitHub releases expose (`just-mcp-*-*.tar.gz`), extracts the executable into `${PKGX_DIR:-$HOME/.pkgx}/bin`, and runs the CLI with the arguments you pass. Add that bin directory to your shell’s `PATH` if you need `just-mcp` available long-term. The packaging manifest lives in [`pkgx/projects/github.com/promptexecution/just-mcp/package.yml`](pkgx/projects/github.com/promptexecution/just-mcp/package.yml) and mirrors the `pkgxdev/pantry` entry.
+
 #### Using Docker
 ```bash
 # Pull the latest image from GitHub Container Registry

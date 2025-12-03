@@ -101,6 +101,13 @@ jobs:
             --draft=false \
             --prerelease=false
 
+      - name: Trigger binary builds
+        if: steps.check_changes.outputs.has_changes == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run build-binaries.yml -f tag="${NEW_TAG}"
+
       - name: Set version output
         id: get_version
         run: |

@@ -22,6 +22,8 @@ jobs:
     # Only run if CI workflow completed successfully and on main branch push (not PR)
     if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -57,33 +59,66 @@ jobs:
       - name: Check if there are releasable changes
         id: check_changes
         run: |
-          if cog check --from-latest-tag; then
-            echo "has_changes=true" >> $GITHUB_OUTPUT
+          echo "Validating commits since last tag..." # output: cog lint log
+          if ! cog check --from-latest-tag; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Checking for releasable conventional commits..." # output: true when bump possible
+          if cog bump --auto --dry-run; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
           else
-            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "No releasable changes detected; skipping release." # output: log only
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
         continue-on-error: true
 
       - name: Create release
         if: steps.check_changes.outputs.has_changes == 'true'
+        id: create_release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Generate changelog and bump version
           cog bump --auto
-          
-          # Get the new version
-          NEW_VERSION=$(cargo pkgid | cut -d# -f2 | cut -d: -f2)
+          NEW_TAG=$(git describe --tags --abbrev=0)
+          NEW_VERSION=${NEW_TAG#v}
+          JUST_MCP_OVERRIDE_VERSION="$NEW_VERSION" ./scripts/update-server-json-version.sh
+          git commit --amend --no-edit
+          git push origin HEAD
+          git push origin "${NEW_TAG}"
+          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
           
           # Generate changelog for the release
-          cog changelog --at "v${NEW_VERSION}" > RELEASE_NOTES.md
+          cog changelog --at "${NEW_TAG}" > RELEASE_NOTES.md
           
           # Create GitHub release
-          gh release create "v${NEW_VERSION}" \
+          gh release create "${NEW_TAG}" \
             --title "Release v${NEW_VERSION}" \
             --notes-file RELEASE_NOTES.md \
             --draft=false \
             --prerelease=false
+
+      - name: Trigger binary builds
+        if: steps.check_changes.outputs.has_changes == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run build-binaries.yml -f tag="${NEW_TAG}"
+
+      - name: Set version output
+        id: get_version
+        run: |
+          if [ "${{ steps.check_changes.outputs.has_changes }}" == "true" ]; then
+            echo "version=${{ steps.create_release.outputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            # If no release was created, get the latest tag version
+            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.1.0")
+            VERSION=${LATEST_TAG#v}
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          fi
 
   publish:
     needs: release
@@ -138,3 +173,43 @@ jobs:
           # Publish binary crate
           cd ..
           cargo publish --token ${CARGO_REGISTRY_TOKEN} || echo "Binary crate publish failed or already published"
+
+  container:
+    needs: release
+    uses: ./.github/workflows/container.yaml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      version: ${{ needs.release.outputs.version }}
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
+
+  publish-mcp-registry:
+    needs:
+      - release
+      - container
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Pull latest changes
+        run: |
+          git pull origin main
+          git fetch --tags
+
+      - name: Install MCP Publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      - name: Login to MCP Registry
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish server metadata
+        run: ./mcp-publisher publish

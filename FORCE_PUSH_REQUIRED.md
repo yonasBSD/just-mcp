@@ -1,34 +1,71 @@
 # Force Push Required to Fix Commit Message Format
 
 ## Summary
-The commit `8be5746d19bdef5f696ce1d449a22b4689a45ee7` in the repository history had a non-compliant commit message "Add MCP Catalog Trust Score badge" that was causing the release workflow to fail during conventional commit validation.
+The commit `8be5746d19bdef5f696ce1d449a22b4689a45ee7` in the repository history has a non-compliant commit message "Add MCP Catalog Trust Score badge" that is causing the release workflow to fail during conventional commit validation.
 
-This issue has been **fixed locally** by rewriting the git history using `git filter-branch`.
+This issue needs to be **fixed by rewriting git history** using the provided script.
 
-## What Was Done
-1. Fetched the full repository history with `git fetch --unshallow`
-2. Used `git filter-branch` to rewrite the commit message from:
-   - **Before**: "Add MCP Catalog Trust Score badge"
-   - **After**: "docs: Add MCP Catalog Trust Score badge"
-3. The problematic commit `8be5746d19bdef5f696ce1d449a22b4689a45ee7` has been rewritten to `02e39a6858b626c4c8367da380f4cce88b7ec723`
+## Problem Details
+The workflow error:
+```
+Errored commit: 8be5746d19bdef5f696ce1d449a22b4689a45ee7 <Matvey-Kuk>
+Commit message: 'Add MCP Catalog Trust Score badge'
+Error: Missing commit type separator `:`
+expected scope or type_separator
+```
 
-## Current Status
-✅ Local `main` branch has corrected history  
-✅ Commit message now follows conventional commit format (docs: prefix)  
-⚠️ **Remote `main` branch still has the old, non-compliant history**
-
-## Required Action
-To apply the fix to the remote repository and resolve the workflow failure, the corrected `main` branch must be force-pushed:
+## Quick Fix (Automated Script)
+A script has been provided to automate the fix:
 
 ```bash
-git checkout main
+./scripts/fix-commit-message.sh
+```
+
+This script will:
+1. Fetch full repository history
+2. Rewrite the commit message to "docs: Add MCP Catalog Trust Score badge"
+3. Clean up filter-branch references
+4. Verify the fix
+
+After running the script, follow the instructions to force-push.
+
+## Manual Fix (Step-by-Step)
+If you prefer to fix manually:
+
+1. Fetch full history:
+```bash
+git fetch --unshallow
+```
+
+2. Rewrite the commit message:
+```bash
+git filter-branch --msg-filter 'if [ "$GIT_COMMIT" = "8be5746d19bdef5f696ce1d449a22b4689a45ee7" ]; then echo "docs: Add MCP Catalog Trust Score badge"; else cat; fi' --force -- --all
+```
+
+3. Clean up:
+```bash
+rm -rf .git/refs/original/
+git reflog expire --expire=now --all
+git gc --prune=now --aggressive
+```
+
+4. Force-push the main branch:
+```bash
 git push origin main --force
 ```
 
-**Alternative (safer):**
+## Alternative Manual Fix (Using git rebase)
+For the merge approach mentioned in the problem statement:
+
 ```bash
+# Note: This approach is more complex due to the commit being in a merged PR
 git checkout main
-git push origin main --force-with-lease
+# Find and amend the specific commit using interactive rebase
+git rebase -i 8be5746^
+# Change 'pick' to 'reword' for commit 8be5746
+# Update the message to: docs: Add MCP Catalog Trust Score badge
+# Save and exit
+git push origin main --force
 ```
 
 ## Verification
